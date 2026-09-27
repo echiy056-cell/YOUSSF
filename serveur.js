@@ -5,221 +5,390 @@ const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const LOG_FILE_PATH = path.join(__dirname, 'monitored_targets.csv');
-const HOST_LOG_PATH = path.join(__dirname, 'host_logs.txt');
-const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const BASE_DIR = __dirname;
+const PUBLIC_DIR = path.join(BASE_DIR, 'public');
+const LOG_FILE_PATH = path.join(BASE_DIR, 'monitored_targets.csv');
+const HOST_LOG_PATH = path.join(BASE_DIR, 'host_logs.txt');
+
+const activeConnections = new Map();
 
 app.use(express.json({ limit: '1mb' }));
-app.get('/', (req, res) => {
-    const indexFile = path.join(PUBLIC_DIR, 'index.html');
-    if (fs.existsSync(indexFile)) {
-        return res.sendFile(indexFile);
-    }
-    return res.send(`<!doctype html><html><body><h1>Server is running</h1><p>Open the monitoring panel API or create a public/index.html file.</p></body></html>`);
-});
-app.use(express.static(PUBLIC_DIR));
 
-let wsConnection = null;
-let heartbeatInterval = null;
-let reconnectTimer = null;
+function ensureDirectoryExists(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
 
 function safeStringify(value) {
-    try {
-        if (value === undefined) return 'undefined';
-        if (typeof value === 'string') return value;
-        return JSON.stringify(value, null, 2);
-    } catch (error) {
-        return String(value);
-    }
+  try {
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return String(value);
+  }
 }
 
 function appendHostLog(message, level = 'INFO') {
-    const timeStamp = new Date().toLocaleTimeString();
-    const text = safeStringify(message);
-    const prefix = level === 'ERROR' ? ' [ERROR]' : '';
-    fs.appendFileSync(HOST_LOG_PATH, `[${timeStamp}]${prefix} ${text}\n`, 'utf8');
+  const timeStamp = new Date().toLocaleTimeString();
+  const text = safeStringify(message);
+  const prefix = level === 'ERROR' ? ' [ERROR]' : '';
+  fs.appendFileSync(HOST_LOG_PATH, `[${timeStamp}]${prefix} ${text}\n`, 'utf8');
 }
 
-// تجهيز الملفات الأساسية عند التشغيل لمنع الأخطاء
-if (!fs.existsSync(LOG_FILE_PATH)) {
-    fs.writeFileSync(LOG_FILE_PATH, 'Timestamp,User ID,Username,Server ID\n', 'utf8');
-}
-if (!fs.existsSync(HOST_LOG_PATH)) {
-    fs.writeFileSync(HOST_LOG_PATH, `=== بداية تشغيل السيرفر التاريخ: ${new Date().toLocaleString()} ===\n`, 'utf8');
+function csvEscape(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
 }
 
-const originalLog = console.log;
-const originalError = console.error;
+function normalizeToken(token) {
+  if (typeof token !== 'string') return '';
+  return token.trim();
+}
 
-console.log = function(...args) {
-    appendHostLog(args.length > 1 ? args.map(safeStringify).join(' ') : args[0], 'INFO');
+function parseTokenList(input) {
+  if (Array.isArray(input)) {
+    return input.map(normalizeToken).filter(Boolean);
+  }
+
+  if (typeof input === 'string') {
+    return input
+      .split(/[\r\n,;]+/)
+      .map(normalizeToken)
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function initializeFiles() {
+  ensureDirectoryExists(PUBLIC_DIR);
+
+  if (!fs.existsSync(LOG_FILE_PATH)) {
+    fs.writeFileSync(
+      LOG_FILE_PATH,
+      'Timestamp,User ID,Username,Global Name,Discriminator,Avatar,Bot,Guild ID,Joined At,Raw Data JSON\n',
+      'utf8'
+    );
+  }
+
+  if (!fs.existsSync(HOST_LOG_PATH)) {
+    fs.writeFileSync(
+      HOST_LOG_PATH,
+      `=== Server started: ${new Date().toLocaleString()} ===\n`,
+      'utf8'
+    );
+  }
+}
+
+function patchConsoleLogging() {
+  const originalLog = console.log;
+  const originalError = console.error;
+
+  console.log = (...args) => {
+    const message = args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]);
+    appendHostLog(message, 'INFO');
     originalLog.apply(console, args);
-};
+  };
 
-console.error = function(...args) {
-    appendHostLog(args.length > 1 ? args.map(safeStringify).join(' ') : args[0], 'ERROR');
+  console.error = (...args) => {
+    const message = args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]);
+    appendHostLog(message, 'ERROR');
     originalError.apply(console, args);
-};
+  };
+}
 
-function logNewTarget(userId, username, guildId) {
-    const timestamp = new Date().toISOString();
-    const safeUser = String(username || 'unknown').replace(/"/g, '""');
-    const safeGuildId = String(guildId || 'unknown');
-    const logLine = `"${timestamp}","${userId}","${safeUser}","${safeGuildId}"\n`;
+function appendTargetEntry(entry) {
+  const timestamp = entry && entry.timestamp ? entry.timestamp : new Date().toISOString();
+  const user = entry && entry.user ? entry.user : {};
+  const guildId = entry && entry.guildId ? entry.guildId : '';
+  const joinedAt = entry && entry.joinedAt ? entry.joinedAt : '';
+  const rawData = entry && entry.rawData ? entry.rawData : {};
 
-    fs.appendFileSync(LOG_FILE_PATH, logLine, 'utf8');
-    console.log(`[TARGET LOGGED] User: ${safeUser} joined Guild: ${safeGuildId}`);
+  const row = [
+    timestamp,
+    user.id || '',
+    user.username || '',
+    user.global_name || '',
+    user.discriminator || '',
+    user.avatar || '',
+    user.bot ? 'true' : 'false',
+    guildId,
+    joinedAt,
+    JSON.stringify(rawData)
+  ].map(csvEscape).join(',');
+
+  fs.appendFileSync(LOG_FILE_PATH, `${row}\n`, 'utf8');
+  console.log(`[TARGET LOGGED] User: ${user.username || 'unknown'} joined Guild: ${guildId}`);
+}
+
+function logNewTarget(user, guildId, extra = {}) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    user: {
+      id: user && user.id ? user.id : '',
+      username: user && user.username ? user.username : 'unknown',
+      global_name: user && user.global_name ? user.global_name : '',
+      discriminator: user && user.discriminator ? user.discriminator : '',
+      avatar: user && user.avatar ? user.avatar : '',
+      bot: Boolean(user && user.bot)
+    },
+    guildId: guildId || '',
+    joinedAt: extra.joinedAt || new Date().toISOString(),
+    rawData: {
+      ...extra,
+      user: user || {},
+      guild_id: guildId || '',
+      joined_at: extra.joinedAt || new Date().toISOString()
+    }
+  };
+
+  appendTargetEntry(entry);
 }
 
 function connectToDiscordGateway(token) {
-    if (!token || typeof token !== 'string' || !token.trim()) {
-        throw new Error('التوكن غير صالح أو مفقود.');
+  const normalizedToken = normalizeToken(token);
+  if (!normalizedToken) {
+    throw new Error('Token is missing or invalid.');
+  }
+
+  const existing = activeConnections.get(normalizedToken);
+  if (existing && (existing.ws.readyState === WebSocket.OPEN || existing.ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  if (existing && existing.reconnectTimer) {
+    clearTimeout(existing.reconnectTimer);
+    existing.reconnectTimer = null;
+  }
+
+  console.log('Connecting to Discord Gateway...');
+  const ws = new WebSocket('wss://gateway.discord.gg/?v=9&encoding=json');
+  const connection = { ws, heartbeat: null, reconnectTimer: null, token: normalizedToken };
+  activeConnections.set(normalizedToken, connection);
+
+  ws.on('open', () => {
+    console.log('WebSocket connected.');
+  });
+
+  ws.on('message', (data) => {
+    let payload;
+    try {
+      payload = JSON.parse(typeof data === 'string' ? data : data.toString());
+    } catch (error) {
+      console.error(`Failed to parse message: ${error.message}`);
+      return;
     }
 
-    if (wsConnection && (wsConnection.readyState === WebSocket.OPEN || wsConnection.readyState === WebSocket.CONNECTING)) {
-        return;
+    const { op, d, t } = payload || {};
+
+    switch (op) {
+      case 10: {
+        const heartbeatMs = Number(d && d.heartbeat_interval) || 30000;
+
+        if (connection.heartbeat) {
+          clearInterval(connection.heartbeat);
+        }
+
+        connection.heartbeat = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ op: 1, d: null }));
+          }
+        }, heartbeatMs);
+
+        const identifyPayload = {
+          op: 2,
+          d: {
+            token: normalizedToken,
+            capabilities: 125,
+            properties: {
+              os: 'Windows',
+              browser: 'Chrome',
+              device: ''
+            },
+            presence: { status: 'online', since: 0, afk: false },
+            compress: false
+          }
+        };
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(identifyPayload));
+        }
+        break;
+      }
+
+      case 0:
+        if (t === 'READY') {
+          const username = d && d.user ? d.user.username : 'unknown';
+          console.log(`[SUCCESS] Logged in as: ${username}`);
+        }
+
+        if (t === 'GUILD_MEMBER_ADD') {
+          const guildId = d && d.guild_id;
+          const user = d && d.user;
+          const member = d && d.member ? d.member : {};
+
+          if (user) {
+            logNewTarget(user, guildId, {
+              joinedAt: member.joined_at || new Date().toISOString(),
+              nick: member.nick || '',
+              pending: Boolean(member.pending),
+              premium_since: member.premium_since || '',
+              roles: Array.isArray(member.roles) ? member.roles : []
+            });
+          }
+        }
+        break;
+    }
+  });
+
+  ws.on('close', () => {
+    if (connection.heartbeat) {
+      clearInterval(connection.heartbeat);
+      connection.heartbeat = null;
     }
 
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-    }
+    console.log('Gateway disconnected. Reconnecting in 5 seconds...');
+    connection.reconnectTimer = setTimeout(() => connectToDiscordGateway(normalizedToken), 5000);
+  });
 
-    console.log('جاري الاتصال بـ Discord Gateway...');
-    wsConnection = new WebSocket('wss://gateway.discord.gg/?v=9&encoding=json');
-
-    wsConnection.on('open', () => {
-        console.log('تم فتح الاتصال الأولي بالبوابة.');
-    });
-
-    wsConnection.on('message', (data) => {
-        let payload;
-        try {
-            payload = JSON.parse(typeof data === 'string' ? data : data.toString());
-        } catch (error) {
-            console.error(`تعذر تحليل رسالة WebSocket: ${error.message}`);
-            return;
-        }
-
-        const { op, d, t } = payload || {};
-
-        switch (op) {
-            case 10: {
-                const heartbeatIntervalMs = Number(d && d.heartbeat_interval) || 30000;
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                }
-
-                heartbeatInterval = setInterval(() => {
-                    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                        wsConnection.send(JSON.stringify({ op: 1, d: null }));
-                    }
-                }, heartbeatIntervalMs);
-
-                const identifyPayload = {
-                    op: 2,
-                    d: {
-                        token: token.trim(),
-                        capabilities: 125,
-                        properties: {
-                            os: 'Windows',
-                            browser: 'Chrome',
-                            device: ''
-                        },
-                        presence: { status: 'online', since: 0, afk: false },
-                        compress: false
-                    }
-                };
-
-                if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                    wsConnection.send(JSON.stringify(identifyPayload));
-                }
-                break;
-            }
-
-            case 0:
-                if (t === 'READY') {
-                    console.log(`[SUCCESS] تم تسجيل الدخول بنجاح باسم الحساب: ${d && d.user ? d.user.username : 'غير معروف'}`);
-                }
-
-                if (t === 'GUILD_MEMBER_ADD') {
-                    const guildId = d && d.guild_id;
-                    const user = d && d.user;
-                    if (user) {
-                        logNewTarget(user.id, user.username, guildId);
-                    }
-                }
-                break;
-        }
-    });
-
-    wsConnection.on('close', () => {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-
-        console.log('تم قطع الاتصال بالبوابة. جاري محاولة إعادة الاتصال التلقائي بعد 5 ثوانٍ...');
-        reconnectTimer = setTimeout(() => connectToDiscordGateway(token), 5000);
-    });
-
-    wsConnection.on('error', (error) => {
-        console.error(`حدث خطأ في الاتصال بالبوابة: ${error && error.message ? error.message : error}`);
-    });
+  ws.on('error', (error) => {
+    console.error(`Gateway error: ${error && error.message ? error.message : error}`);
+  });
 }
 
+app.get('/', (req, res) => {
+  const indexFile = path.join(PUBLIC_DIR, 'index.html');
+  if (fs.existsSync(indexFile)) {
+    return res.sendFile(indexFile);
+  }
+
+  return res.send(`
+    <!doctype html>
+    <html>
+      <body style="font-family:Arial;padding:30px;">
+        <h1>Monitoring Panel</h1>
+        <p>Server is running.</p>
+      </body>
+    </html>
+  `);
+});
+
+app.use(express.static(PUBLIC_DIR));
+
 app.post('/api/start-monitor', (req, res) => {
-    const { token } = req.body || {};
-    if (!token || typeof token !== 'string' || !token.trim()) {
-        return res.status(400).json({ status: 'error', message: 'التوكن مطلوب لتشغيل الخدمة.' });
+  const { token, tokens } = req.body || {};
+  const tokenList = parseTokenList(tokens || token);
+
+  if (!tokenList.length) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'A valid Discord token is required.'
+    });
+  }
+
+  try {
+    tokenList.forEach((singleToken) => connectToDiscordGateway(singleToken));
+
+    return res.json({
+      status: 'success',
+      message: `Monitoring started for ${tokenList.length} token(s).`,
+      count: tokenList.length
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: error && error.message ? error.message : 'Unknown server error.'
+    });
+  }
+});
+
+app.get('/api/targets', (req, res) => {
+  if (!fs.existsSync(LOG_FILE_PATH)) {
+    return res.json([]);
+  }
+
+  const content = fs.readFileSync(LOG_FILE_PATH, 'utf8').trim();
+  if (!content) {
+    return res.json([]);
+  }
+
+  const lines = content.split(/\r?\n/).filter(Boolean);
+  if (lines.length <= 1) {
+    return res.json([]);
+  }
+
+  const rows = lines.slice(1).map((line) => {
+    const values = line.match(/"([^"]*(?:""[^"]*)*)"|([^,]+)/g) || [];
+    const cleaned = values.map((value) => value.replace(/^"|"$/g, '').replace(/""/g, '"'));
+
+    let rawData = {};
+    try {
+      rawData = JSON.parse(cleaned[9] || '{}');
+    } catch (error) {
+      rawData = {};
     }
 
-    try {
-        connectToDiscordGateway(token);
-        res.json({ status: 'success', message: 'بدأت عملية المراقبة الحية بنجاح.' });
-    } catch (err) {
-        res.status(500).json({ status: 'error', message: err && err.message ? err.message : 'حدث خطأ غير معروف.' });
-    }
+    return {
+      timestamp: cleaned[0] || '',
+      userId: cleaned[1] || '',
+      username: cleaned[2] || '',
+      globalName: cleaned[3] || '',
+      discriminator: cleaned[4] || '',
+      avatar: cleaned[5] || '',
+      bot: cleaned[6] === 'true',
+      guildId: cleaned[7] || '',
+      joinedAt: cleaned[8] || '',
+      rawData
+    };
+  }).filter((row) => row.timestamp || row.userId || row.username || row.guildId);
+
+  return res.json(rows);
 });
 
 app.get('/api/download-targets', (req, res) => {
-    if (fs.existsSync(LOG_FILE_PATH)) {
-        res.download(LOG_FILE_PATH, 'targets.csv');
-    } else {
-        res.status(404).send('لا توجد بيانات مسجلة بعد.');
-    }
+  if (fs.existsSync(LOG_FILE_PATH)) {
+    return res.download(LOG_FILE_PATH, 'targets.csv');
+  }
+
+  return res.status(404).send('No data available yet.');
 });
 
 app.get('/api/download-host-logs', (req, res) => {
-    if (fs.existsSync(HOST_LOG_PATH)) {
-        res.download(HOST_LOG_PATH, 'host_logs.txt');
-    } else {
-        res.status(404).send('ملف السجلات غير موجود.');
-    }
+  if (fs.existsSync(HOST_LOG_PATH)) {
+    return res.download(HOST_LOG_PATH, 'host_logs.txt');
+  }
+
+  return res.status(404).send('Host logs not found.');
 });
 
 app.use((req, res) => {
-    const rawPath = req.originalUrl || req.url || '';
-    const decodedPath = (() => {
-        try {
-            return decodeURIComponent(rawPath);
-        } catch (error) {
-            return rawPath;
-        }
-    })();
-
-    const isMalformedQuotePath = rawPath.includes('%22') || decodedPath.includes('"') || decodedPath === '/"' || decodedPath === '"';
-    if (isMalformedQuotePath || decodedPath === '/') {
-        return res.redirect('/');
+  const rawPath = req.originalUrl || req.url || '';
+  const decodedPath = (() => {
+    try {
+      return decodeURIComponent(rawPath);
+    } catch (error) {
+      return rawPath;
     }
+  })();
 
-    if (rawPath.startsWith('/api/')) {
-        return res.status(404).json({ status: 'error', message: `Route not found: ${rawPath}` });
-    }
+  const malformed = rawPath.includes('%22') || decodedPath.includes('"') || decodedPath === '/"' || decodedPath === '"';
+  if (malformed || decodedPath === '/') {
+    return res.redirect('/');
+  }
 
-    return res.status(404).send(`Route not found: ${rawPath}`);
+  if (rawPath.startsWith('/api/')) {
+    return res.status(404).json({ status: 'error', message: `Route not found: ${rawPath}` });
+  }
+
+  return res.status(404).send(`Route not found: ${rawPath}`);
 });
 
+initializeFiles();
+patchConsoleLogging();
+
 app.listen(PORT, () => {
-    console.log(`اللوحة تعمل الآن بنجاح على الرابط التالي: http://localhost:${PORT}`);
+  console.log(`Monitoring panel is running at: http://localhost:${PORT}`);
 });
