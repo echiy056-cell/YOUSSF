@@ -16,8 +16,6 @@
         --green-soft: rgba(34, 197, 94, 0.15);
         --blue: #38bdf8;
         --blue-soft: rgba(56, 189, 248, 0.12);
-        --red: #ef4444;
-        --yellow: #fbbf24;
       }
 
       * { box-sizing: border-box; }
@@ -30,7 +28,7 @@
       }
 
       .container {
-        width: min(1200px, 95%);
+        width: min(1300px, 96%);
         margin: 32px auto;
       }
 
@@ -48,7 +46,6 @@
       .brand {
         font-size: 1.4rem;
         font-weight: 700;
-        letter-spacing: 0.04em;
       }
 
       .status {
@@ -105,13 +102,7 @@
         font-size: 0.9rem;
       }
 
-      .token-box {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      input[type="password"], button {
+      textarea, button {
         width: 100%;
         border-radius: 10px;
         border: 1px solid var(--line);
@@ -119,9 +110,11 @@
         font-size: 1rem;
       }
 
-      input[type="password"] {
+      textarea {
         background: rgba(15, 23, 42, 0.95);
         color: var(--text);
+        min-height: 110px;
+        resize: vertical;
       }
 
       button {
@@ -130,12 +123,6 @@
         color: white;
         cursor: pointer;
         font-weight: 700;
-        transition: transform 0.15s ease, opacity 0.15s ease;
-      }
-
-      button:hover {
-        transform: translateY(-1px);
-        opacity: 0.96;
       }
 
       .button-row {
@@ -150,61 +137,34 @@
         color: var(--text);
       }
 
-      .table-wrap {
-        margin-top: 24px;
-      }
-
       table {
         width: 100%;
         border-collapse: collapse;
+        margin-top: 20px;
         background: rgba(17, 24, 39, 0.9);
         border: 1px solid var(--line);
-        border-radius: 14px;
-        overflow: hidden;
       }
 
       th, td {
-        padding: 14px 16px;
+        padding: 12px 10px;
         text-align: left;
         border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        font-size: 12px;
       }
 
       th {
         color: var(--muted);
-        font-size: 0.8rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
         background: rgba(15, 23, 42, 0.9);
       }
 
-      tr:last-child td {
-        border-bottom: none;
+      .wide {
+        min-width: 240px;
       }
 
-      .badge-ok {
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: var(--green-soft);
-        color: #bbf7d0;
-        border: 1px solid rgba(34,197,94,0.4);
-      }
-
-      .badge-off {
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(239,68,68,0.12);
-        color: #fecaca;
-        border: 1px solid rgba(239,68,68,0.35);
-      }
-
-      @media (max-width: 820px) {
+      @media (max-width: 900px) {
         .grid {
           grid-template-columns: 1fr;
-        }
-        .button-row {
-          flex-direction: column;
         }
       }
     </style>
@@ -238,19 +198,17 @@
 
       <div class="card" style="margin-top: 24px;">
         <h3>Control Panel</h3>
-        <div class="token-box">
-          <input id="tokenInput" type="password" placeholder="Enter Discord token" />
-          <div class="button-row">
-            <button id="startBtn">Start Monitoring</button>
-            <button class="secondary" id="downloadTargetsBtn">Download CSV</button>
-          </div>
-          <div class="button-row">
-            <button class="secondary" id="downloadLogsBtn">Download Logs</button>
-          </div>
+        <textarea id="tokenInput" placeholder="Paste one token per line, or separate by commas/semicolons"></textarea>
+        <div class="button-row">
+          <button id="startBtn">Start Monitoring</button>
+          <button class="secondary" id="downloadTargetsBtn">Download CSV</button>
+        </div>
+        <div class="button-row">
+          <button class="secondary" id="downloadLogsBtn">Download Logs</button>
         </div>
       </div>
 
-      <div class="table-wrap card">
+      <div class="card" style="margin-top: 24px;">
         <h3>Recent Targets</h3>
         <table>
           <thead>
@@ -258,12 +216,18 @@
               <th>Timestamp</th>
               <th>User ID</th>
               <th>Username</th>
+              <th>Global Name</th>
+              <th>Discriminator</th>
+              <th>Avatar</th>
+              <th>Bot</th>
               <th>Guild ID</th>
+              <th>Joined At</th>
+              <th class="wide">Raw Data</th>
             </tr>
           </thead>
           <tbody id="targetsBody">
             <tr>
-              <td colspan="4" class="muted">No targets logged yet.</td>
+              <td colspan="10" class="muted">No targets logged yet.</td>
             </tr>
           </tbody>
         </table>
@@ -277,28 +241,12 @@
       const targetCount = document.getElementById('target-count');
       const activityStatus = document.getElementById('activity-status');
 
-      async function fetchCsvRows() {
+      async function fetchTargetRows() {
         try {
-          const response = await fetch('/api/download-targets');
+          const response = await fetch('/api/targets');
           if (!response.ok) return [];
-          const text = await response.text();
-          if (!text.trim()) return [];
-
-          const lines = text.trim().split(/\r?\n/);
-          const rows = [];
-          for (let i = 1; i < lines.length; i++) {
-            const line = lines[i];
-            if (!line) continue;
-            const values = line.match(/"([^"]*(?:""[^"]*)*)"|([^,]+)/g) || [];
-            const cleaned = values.map(v => v.replace(/^"|"$/g, '').replace(/""/g, '"'));
-            rows.push({
-              timestamp: cleaned[0] || '',
-              userId: cleaned[1] || '',
-              username: cleaned[2] || '',
-              guildId: cleaned[3] || ''
-            });
-          }
-          return rows;
+          const rows = await response.json();
+          return Array.isArray(rows) ? rows : [];
         } catch (error) {
           return [];
         }
@@ -306,31 +254,46 @@
 
       function renderRows(rows) {
         if (!rows.length) {
-          targetsBody.innerHTML = '<tr><td colspan="4" class="muted">No targets logged yet.</td></tr>';
+          targetsBody.innerHTML = '<tr><td colspan="10" class="muted">No targets logged yet.</td></tr>';
           targetCount.textContent = '0';
           return;
         }
 
         targetCount.textContent = String(rows.length);
-        targetsBody.innerHTML = rows.slice(-8).reverse().map(row => `
-          <tr>
-            <td>${row.timestamp || '-'}</td>
-            <td>${row.userId || '-'}</td>
-            <td>${row.username || '-'}</td>
-            <td>${row.guildId || '-'}</td>
-          </tr>
-        `).join('');
+        targetsBody.innerHTML = rows.slice(-20).reverse().map(row => {
+          const rawString = row.rawData ? JSON.stringify(row.rawData) : '{}';
+          return `
+            <tr>
+              <td>${row.timestamp || '-'}</td>
+              <td>${row.userId || '-'}</td>
+              <td>${row.username || '-'}</td>
+              <td>${row.globalName || '-'}</td>
+              <td>${row.discriminator || '-'}</td>
+              <td>${row.avatar || '-'}</td>
+              <td>${row.bot ? 'Yes' : 'No'}</td>
+              <td>${row.guildId || '-'}</td>
+              <td>${row.joinedAt || '-'}</td>
+              <td class="wide" title="${rawString.replace(/"/g, '&quot;')}">
+                ${rawString.length > 80 ? rawString.slice(0, 80) + '…' : rawString}
+              </td>
+            </tr>
+          `;
+        }).join('');
       }
 
       async function loadTargets() {
-        const rows = await fetchCsvRows();
+        const rows = await fetchTargetRows();
         renderRows(rows);
       }
 
       startBtn.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token) {
-          alert('Please enter a Discord token first.');
+        const tokens = tokenInput.value
+          .split(/[\r\n,;]+/)
+          .map((token) => token.trim())
+          .filter(Boolean);
+
+        if (!tokens.length) {
+          alert('Please enter at least one Discord token.');
           return;
         }
 
@@ -339,16 +302,16 @@
           const response = await fetch('/api/start-monitor', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
+            body: JSON.stringify({ tokens })
           });
 
           const result = await response.json();
           if (!response.ok) {
-            throw new Error(result.message || 'Failed to start monitor.');
+            throw new Error(result.message || 'Failed to start monitoring.');
           }
 
           activityStatus.textContent = 'Monitoring';
-          alert(result.message || 'Monitoring started successfully.');
+          alert(result.message || `Monitoring started for ${tokens.length} token(s).`);
         } catch (error) {
           activityStatus.textContent = 'Error';
           alert(error.message || 'Something went wrong.');
