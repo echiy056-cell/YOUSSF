@@ -1,17 +1,11 @@
 {
   "name": "discord-monitor",
   "version": "1.0.0",
-  "description": "Discord monitoring server",
+  "description": "Discord join monitor",
   "main": "serveur.js",
   "scripts": {
     "start": "node serveur.js"
   },
-  "keywords": [
-    "discord",
-    "monitoring",
-    "server"
-  ],
-  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
