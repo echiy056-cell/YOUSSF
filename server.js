@@ -82,7 +82,25 @@ const covertMonitorMiddleware = (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-        // Verify token (without checking expiration for monitoring purposes if you want to track expired tokens too)
+      // ... existing code ...
+
+/**
+ * 4. ROOT ROUTE
+ */
+app.get('/', (req, res) => {
+    res.json({ 
+        message: "Covert Monitor API is active",
+        endpoints: {
+            login: "/auth/login",
+            data: "/api/covert-data"
+        }
+    });
+});
+
+// Start Server
+app.listen(PORT, () => {
+    console.log(`Covert Monitor API running on port ${PORT}`);
+});  // Verify token (without checking expiration for monitoring purposes if you want to track expired tokens too)
         const decoded = jwt.verify(token, JWT_SECRET);
         
         // Extract hidden monitoring ID
