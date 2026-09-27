@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monitoring Dashboard</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --panel-2: #1f2937;
+        --line: rgba(148, 163, 184, 0.18);
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --green: #22c55e;
+        --green-soft: rgba(34, 197, 94, 0.15);
+        --blue: #38bdf8;
+        --blue-soft: rgba(56, 189, 248, 0.12);
+        --red: #ef4444;
+        --yellow: #fbbf24;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background: linear-gradient(135deg, #020817 0%, #0f172a 45%, #111827 100%);
+        color: var(--text);
+      }
+
+      .container {
+        width: min(1200px, 95%);
+        margin: 32px auto;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px 22px;
+        box-shadow: 0 20px 45px rgba(0,0,0,0.22);
+      }
+
+      .brand {
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--green-soft);
+        color: #bbf7d0;
+        border: 1px solid rgba(34, 197, 94, 0.35);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 0.85rem;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 12px rgba(34,197,94,0.9);
+      }
+
+      .grid {
+        margin-top: 24px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 18px 30px rgba(0,0,0,0.14);
+      }
+
+      .card h3 {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 0.9rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .metric {
+        font-size: 2.1rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .token-box {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      input[type="password"], button {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        padding: 12px 14px;
+        font-size: 1rem;
+      }
+
+      input[type="password"] {
+        background: rgba(15, 23, 42, 0.95);
+        color: var(--text);
+      }
+
+      button {
+        background: linear-gradient(135deg, var(--blue), #2563eb);
+        border: none;
+        color: white;
+        cursor: pointer;
+        font-weight: 700;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        opacity: 0.96;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .secondary {
+        background: rgba(148, 163, 184, 0.12);
+        border: 1px solid var(--line);
+        color: var(--text);
+      }
+
+      .table-wrap {
+        margin-top: 24px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+
+      th, td {
+        padding: 14px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: rgba(15, 23, 42, 0.9);
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      .badge-ok {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--green-soft);
+        color: #bbf7d0;
+        border: 1px solid rgba(34,197,94,0.4);
+      }
+
+      .badge-off {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(239,68,68,0.12);
+        color: #fecaca;
+        border: 1px solid rgba(239,68,68,0.35);
+      }
+
+      @media (max-width: 820px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .button-row {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="topbar">
+        <div class="brand">Monitor Control</div>
+        <div class="status"><span class="dot"></span> Service Active</div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Session</h3>
+          <div class="metric">Online</div>
+          <div class="muted">Gateway connection status</div>
+        </div>
+
+        <div class="card">
+          <h3>Targets</h3>
+          <div class="metric" id="target-count">0</div>
+          <div class="muted">Tracked users this session</div>
+        </div>
+
+        <div class="card">
+          <h3>Activity</h3>
+          <div class="metric" id="activity-status">Idle</div>
+          <div class="muted">Last monitor event</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 24px;">
+        <h3>Control Panel</h3>
+        <div class="token-box">
+          <input id="tokenInput" type="password" placeholder="Enter Discord token" />
+          <div class="button-row">
+            <button id="startBtn">Start Monitoring</button>
+            <button class="secondary" id="downloadTargetsBtn">Download CSV</button>
+          </div>
+          <div class="button-row">
+            <button class="secondary" id="downloadLogsBtn">Download Logs</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap card">
+        <h3>Recent Targets</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User ID</th>
+              <th>Username</th>
+              <th>Guild ID</th>
+            </tr>
+          </thead>
+          <tbody id="targetsBody">
+            <tr>
+              <td colspan="4" class="muted">No targets logged yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const startBtn = document.getElementById('startBtn');
+      const tokenInput = document.getElementById('tokenInput');
+      const targetsBody = document.getElementById('targetsBody');
+      const targetCount = document.getElementById('target-count');
+      const activityStatus = document.getElementById('activity-status');
+
+      async function fetchCsvRows() {
+        try {
+          const response = await fetch('/api/download-targets');
+          if (!response.ok) return [];
+          const text = await response.text();
+          if (!text.trim()) return [];
+
+          const lines = text.trim().split(/\r?\n/);
+          const rows = [];
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line) continue;
+            const values = line.match(/"([^"]*(?:""[^"]*)*)"|([^,]+)/g) || [];
+            const cleaned = values.map(v => v.replace(/^"|"$/g, '').replace(/""/g, '"'));
+            rows.push({
+              timestamp: cleaned[0] || '',
+              userId: cleaned[1] || '',
+              username: cleaned[2] || '',
+              guildId: cleaned[3] || ''
+            });
+          }
+          return rows;
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function renderRows(rows) {
+        if (!rows.length) {
+          targetsBody.innerHTML = '<tr><td colspan="4" class="muted">No targets logged yet.</td></tr>';
+          targetCount.textContent = '0';
+          return;
+        }
+
+        targetCount.textContent = String(rows.length);
+        targetsBody.innerHTML = rows.slice(-8).reverse().map(row => `
+          <tr>
+            <td>${row.timestamp || '-'}</td>
+            <td>${row.userId || '-'}</td>
+            <td>${row.username || '-'}</td>
+            <td>${row.guildId || '-'}</td>
+          </tr>
+        `).join('');
+      }
+
+      async function loadTargets() {
+        const rows = await fetchCsvRows();
+        renderRows(rows);
+      }
+
+      startBtn.addEventListener('click', async () => {
+        const token = tokenInput.value.trim();
+        if (!token) {
+          alert('Please enter a Discord token first.');
+          return;
+        }
+
+        activityStatus.textContent = 'Starting';
+        try {
+          const response = await fetch('/api/start-monitor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+          });
+
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.message || 'Failed to start monitor.');
+          }
+
+          activityStatus.textContent = 'Monitoring';
+          alert(result.message || 'Monitoring started successfully.');
+        } catch (error) {
+          activityStatus.textContent = 'Error';
+          alert(error.message || 'Something went wrong.');
+        }
+      });
+
+      document.getElementById('downloadTargetsBtn').addEventListener('click', () => {
+        window.location.href = '/api/download-targets';
+      });
+
+      document.getElementById('downloadLogsBtn').addEventListener('click', () => {
+        window.location.href = '/api/download-host-logs';
+      });
+
+      loadTargets();
+      setInterval(loadTargets, 5000);
+    </script>
+  </body>
+</html>
