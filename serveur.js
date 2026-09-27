@@ -5,21 +5,15 @@ const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-const BASE_DIR = __dirname;
-const PUBLIC_DIR = path.join(BASE_DIR, 'public');
-const LOG_FILE_PATH = path.join(BASE_DIR, 'monitored_targets.csv');
-const HOST_LOG_PATH = path.join(BASE_DIR, 'host_logs.txt');
+const LOG_FILE_PATH = path.join(__dirname, 'monitored_targets.csv');
+const HOST_LOG_PATH = path.join(__dirname, 'host_logs.txt');
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const activeConnections = new Map();
+const tokenTargets = new Map();
+const tokenStatus = new Map();
 
 app.use(express.json({ limit: '1mb' }));
-
-function ensureDirectoryExists(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
 
 function safeStringify(value) {
   try {
@@ -52,55 +46,71 @@ function parseTokenList(input) {
   if (Array.isArray(input)) {
     return input.map(normalizeToken).filter(Boolean);
   }
-
   if (typeof input === 'string') {
-    return input
-      .split(/[\r\n,;]+/)
-      .map(normalizeToken)
-      .filter(Boolean);
+    return input.split(/[\r\n,;]+/).map(normalizeToken).filter(Boolean);
   }
-
   return [];
 }
 
-function initializeFiles() {
-  ensureDirectoryExists(PUBLIC_DIR);
+function ensureTokenState(token) {
+  const key = normalizeToken(token);
+  if (!key) return null;
 
-  if (!fs.existsSync(LOG_FILE_PATH)) {
-    fs.writeFileSync(
-      LOG_FILE_PATH,
-      'Timestamp,User ID,Username,Global Name,Discriminator,Avatar,Bot,Guild ID,Joined At,Raw Data JSON\n',
-      'utf8'
-    );
+  if (!tokenStatus.has(key)) {
+    tokenStatus.set(key, {
+      token: key,
+      status: 'idle',
+      connected: false,
+      targetCount: 0,
+      startedAt: null,
+      updatedAt: new Date().toISOString()
+    });
   }
 
-  if (!fs.existsSync(HOST_LOG_PATH)) {
-    fs.writeFileSync(
-      HOST_LOG_PATH,
-      `=== Server started: ${new Date().toLocaleString()} ===\n`,
-      'utf8'
-    );
-  }
+  return tokenStatus.get(key);
 }
 
-function patchConsoleLogging() {
-  const originalLog = console.log;
-  const originalError = console.error;
+function updateTokenState(token, patch = {}) {
+  const state = ensureTokenState(token);
+  if (!state) return null;
 
-  console.log = (...args) => {
-    const message = args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]);
-    appendHostLog(message, 'INFO');
-    originalLog.apply(console, args);
+  const merged = {
+    ...state,
+    ...patch,
+    token: normalizeToken(token),
+    updatedAt: new Date().toISOString(),
+    targetCount: (tokenTargets.get(normalizeToken(token)) || []).length
   };
 
-  console.error = (...args) => {
-    const message = args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]);
-    appendHostLog(message, 'ERROR');
-    originalError.apply(console, args);
-  };
+  tokenStatus.set(normalizeToken(token), merged);
+  return merged;
 }
 
-function appendTargetEntry(entry) {
+if (!fs.existsSync(LOG_FILE_PATH)) {
+  fs.writeFileSync(
+    LOG_FILE_PATH,
+    'Timestamp,User ID,Username,Global Name,Discriminator,Avatar,Bot,Guild ID,Joined At,Raw Data JSON\n',
+    'utf8'
+  );
+}
+if (!fs.existsSync(HOST_LOG_PATH)) {
+  fs.writeFileSync(HOST_LOG_PATH, `=== Server started: ${new Date().toLocaleString()} ===\n`, 'utf8');
+}
+
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = function (...args) {
+  appendHostLog(args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]), 'INFO');
+  originalLog.apply(console, args);
+};
+
+console.error = function (...args) {
+  appendHostLog(args.length > 1 ? args.map(safeStringify).join(' ') : safeStringify(args[0]), 'ERROR');
+  originalError.apply(console, args);
+};
+
+function appendTargetEntry(entry, tokenKey = 'default') {
   const timestamp = entry && entry.timestamp ? entry.timestamp : new Date().toISOString();
   const user = entry && entry.user ? entry.user : {};
   const guildId = entry && entry.guildId ? entry.guildId : '';
@@ -121,10 +131,28 @@ function appendTargetEntry(entry) {
   ].map(csvEscape).join(',');
 
   fs.appendFileSync(LOG_FILE_PATH, `${row}\n`, 'utf8');
+
+  if (!tokenTargets.has(tokenKey)) {
+    tokenTargets.set(tokenKey, []);
+  }
+
+  tokenTargets.get(tokenKey).push({
+    timestamp,
+    userId: user.id || '',
+    username: user.username || 'unknown',
+    globalName: user.global_name || '',
+    discriminator: user.discriminator || '',
+    avatar: user.avatar || '',
+    bot: Boolean(user.bot),
+    guildId,
+    joinedAt,
+    rawData
+  });
+
   console.log(`[TARGET LOGGED] User: ${user.username || 'unknown'} joined Guild: ${guildId}`);
 }
 
-function logNewTarget(user, guildId, extra = {}) {
+function logNewTarget(user, guildId, extra = {}, tokenKey = 'default') {
   const entry = {
     timestamp: new Date().toISOString(),
     user: {
@@ -145,7 +173,7 @@ function logNewTarget(user, guildId, extra = {}) {
     }
   };
 
-  appendTargetEntry(entry);
+  appendTargetEntry(entry, tokenKey);
 }
 
 function connectToDiscordGateway(token) {
@@ -154,7 +182,15 @@ function connectToDiscordGateway(token) {
     throw new Error('Token is missing or invalid.');
   }
 
+  const tokenKey = normalizedToken.slice(0, 12);
   const existing = activeConnections.get(normalizedToken);
+
+  updateTokenState(normalizedToken, {
+    status: 'connecting',
+    connected: false,
+    startedAt: new Date().toISOString()
+  });
+
   if (existing && (existing.ws.readyState === WebSocket.OPEN || existing.ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
@@ -164,12 +200,21 @@ function connectToDiscordGateway(token) {
     existing.reconnectTimer = null;
   }
 
+  if (!tokenTargets.has(normalizedToken)) {
+    tokenTargets.set(normalizedToken, []);
+  }
+
   console.log('Connecting to Discord Gateway...');
   const ws = new WebSocket('wss://gateway.discord.gg/?v=9&encoding=json');
-  const connection = { ws, heartbeat: null, reconnectTimer: null, token: normalizedToken };
+  const connection = { ws, heartbeat: null, reconnectTimer: null, token: normalizedToken, tokenKey };
   activeConnections.set(normalizedToken, connection);
 
   ws.on('open', () => {
+    updateTokenState(normalizedToken, {
+      status: 'online',
+      connected: true,
+      startedAt: new Date().toISOString()
+    });
     console.log('WebSocket connected.');
   });
 
@@ -187,7 +232,6 @@ function connectToDiscordGateway(token) {
     switch (op) {
       case 10: {
         const heartbeatMs = Number(d && d.heartbeat_interval) || 30000;
-
         if (connection.heartbeat) {
           clearInterval(connection.heartbeat);
         }
@@ -231,13 +275,18 @@ function connectToDiscordGateway(token) {
           const member = d && d.member ? d.member : {};
 
           if (user) {
-            logNewTarget(user, guildId, {
-              joinedAt: member.joined_at || new Date().toISOString(),
-              nick: member.nick || '',
-              pending: Boolean(member.pending),
-              premium_since: member.premium_since || '',
-              roles: Array.isArray(member.roles) ? member.roles : []
-            });
+            logNewTarget(
+              user,
+              guildId,
+              {
+                joinedAt: member.joined_at || new Date().toISOString(),
+                nick: member.nick || '',
+                pending: Boolean(member.pending),
+                premium_since: member.premium_since || '',
+                roles: Array.isArray(member.roles) ? member.roles : []
+              },
+              normalizedToken
+            );
           }
         }
         break;
@@ -250,11 +299,21 @@ function connectToDiscordGateway(token) {
       connection.heartbeat = null;
     }
 
+    updateTokenState(normalizedToken, {
+      status: 'reconnecting',
+      connected: false
+    });
+
     console.log('Gateway disconnected. Reconnecting in 5 seconds...');
     connection.reconnectTimer = setTimeout(() => connectToDiscordGateway(normalizedToken), 5000);
   });
 
   ws.on('error', (error) => {
+    updateTokenState(normalizedToken, {
+      status: 'error',
+      connected: false,
+      error: error && error.message ? error.message : String(error)
+    });
     console.error(`Gateway error: ${error && error.message ? error.message : error}`);
   });
 }
@@ -265,17 +324,8 @@ app.get('/', (req, res) => {
     return res.sendFile(indexFile);
   }
 
-  return res.send(`
-    <!doctype html>
-    <html>
-      <body style="font-family:Arial;padding:30px;">
-        <h1>Monitoring Panel</h1>
-        <p>Server is running.</p>
-      </body>
-    </html>
-  `);
+  return res.send(`<!doctype html><html><body><h1>Server is running</h1><p>Create a public/index.html file or use the monitoring API.</p></body></html>`);
 });
-
 app.use(express.static(PUBLIC_DIR));
 
 app.post('/api/start-monitor', (req, res) => {
@@ -283,14 +333,17 @@ app.post('/api/start-monitor', (req, res) => {
   const tokenList = parseTokenList(tokens || token);
 
   if (!tokenList.length) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'A valid Discord token is required.'
-    });
+    return res.status(400).json({ status: 'error', message: 'A valid Discord token is required.' });
   }
 
   try {
-    tokenList.forEach((singleToken) => connectToDiscordGateway(singleToken));
+    tokenList.forEach((singleToken) => {
+      const normalized = normalizeToken(singleToken);
+      if (!normalized) return;
+      ensureTokenState(normalized);
+      updateTokenState(normalized, { status: 'connecting', connected: false, startedAt: new Date().toISOString() });
+      connectToDiscordGateway(normalized);
+    });
 
     return res.json({
       status: 'success',
@@ -303,6 +356,69 @@ app.post('/api/start-monitor', (req, res) => {
       message: error && error.message ? error.message : 'Unknown server error.'
     });
   }
+});
+
+app.post('/api/remove-token', (req, res) => {
+  const { token } = req.body || {};
+  const normalized = normalizeToken(token);
+
+  if (!normalized) {
+    return res.status(400).json({ status: 'error', message: 'Token is required.' });
+  }
+
+  const connection = activeConnections.get(normalized);
+  if (connection) {
+    if (connection.ws && connection.ws.readyState === WebSocket.OPEN) {
+      connection.ws.close();
+    }
+
+    if (connection.reconnectTimer) {
+      clearTimeout(connection.reconnectTimer);
+    }
+
+    activeConnections.delete(normalized);
+  }
+
+  tokenTargets.delete(normalized);
+  tokenStatus.delete(normalized);
+
+  return res.json({ status: 'success', removed: normalized });
+});
+
+app.post('/api/clear-tokens', (req, res) => {
+  for (const [token, connection] of activeConnections.entries()) {
+    if (connection && connection.ws && (connection.ws.readyState === WebSocket.OPEN || connection.ws.readyState === WebSocket.CONNECTING)) {
+      connection.ws.close();
+    }
+    if (connection && connection.reconnectTimer) {
+      clearTimeout(connection.reconnectTimer);
+    }
+    activeConnections.delete(token);
+  }
+
+  tokenTargets.clear();
+  tokenStatus.clear();
+
+  return res.json({ status: 'success', cleared: true });
+});
+
+app.get('/api/token-status', (req, res) => {
+  const response = {};
+  for (const [token, state] of tokenStatus.entries()) {
+    response[token] = {
+      ...state,
+      targetCount: (tokenTargets.get(token) || []).length
+    };
+  }
+  return res.json(response);
+});
+
+app.get('/api/token-targets', (req, res) => {
+  const response = {};
+  for (const [token, entries] of tokenTargets.entries()) {
+    response[token] = (entries || []).slice(-40).reverse();
+  }
+  return res.json(response);
 });
 
 app.get('/api/targets', (req, res) => {
@@ -352,15 +468,13 @@ app.get('/api/download-targets', (req, res) => {
   if (fs.existsSync(LOG_FILE_PATH)) {
     return res.download(LOG_FILE_PATH, 'targets.csv');
   }
-
-  return res.status(404).send('No data available yet.');
+  return res.status(404).send('No recorded data yet.');
 });
 
 app.get('/api/download-host-logs', (req, res) => {
   if (fs.existsSync(HOST_LOG_PATH)) {
     return res.download(HOST_LOG_PATH, 'host_logs.txt');
   }
-
   return res.status(404).send('Host logs not found.');
 });
 
@@ -385,9 +499,6 @@ app.use((req, res) => {
 
   return res.status(404).send(`Route not found: ${rawPath}`);
 });
-
-initializeFiles();
-patchConsoleLogging();
 
 app.listen(PORT, () => {
   console.log(`Monitoring panel is running at: http://localhost:${PORT}`);
