@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-python member_scraper.py
+set -e
+python3 member_scraper.py
