@@ -1,0 +1,16 @@
+{
+  "name": "sunscraper",
+  "version": "1.0.0",
+  "description": "Discord server member scraper",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "@nottoxinsfx",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js-selfbot-v13": "^3.1.4",
+    "gradient-string": "^2.0.2",
+    "prompt-sync": "^4.2.0"
+  }
+}
