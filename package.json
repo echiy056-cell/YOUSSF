@@ -1,0 +1,34 @@
+{
+  "name": "discord-scraper",
+  "version": "2.1.0",
+  "description": "Discord scraper in node.js, works for guild members. Currently making more types.",
+  "main": "index.js",
+  "typings": "./typings/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Hima",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.25.0",
+    "ws": "^8.4.2"
+  },
+  "directories": {
+    "example": "examples"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Himatric/Discord-Scraper.git"
+  },
+  "keywords": [
+    "discord",
+    "scraper",
+    "memberscraper",
+    "node",
+    "discordmembers"
+  ],
+  "bugs": {
+    "url": "https://github.com/Himatric/Discord-Scraper/issues"
+  },
+  "homepage": "https://github.com/Himatric/Discord-Scraper#readme"
+}
