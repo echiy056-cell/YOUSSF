@@ -1,9 +1,0 @@
-{
-  "token": "your_token_here",
-  "guild_id": "123456789",
-  "welcome_channel_id": null,
-  "only_members": false,
-  "stop_early": false,
-  "message_depth": null,
-  "auto_start": true
-}
