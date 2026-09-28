@@ -4,6 +4,6 @@
   "welcome_channel_id": null,
   "only_members": false,
   "stop_early": false,
-  "message_depth": 1000,
-  "auto_start": false
+  "message_depth": null,
+  "auto_start": true
 }
