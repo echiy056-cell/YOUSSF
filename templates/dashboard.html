@@ -1,0 +1,32 @@
+<!-- templates/dashboard.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Discord Self‑Bot Dashboard – Members</title>
+    <style>
+        table { border-collapse: collapse; width: 80%; margin: auto; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Discord Self‑Bot Dashboard</h1>
+    <form action="/stop_bot" method="post">
+        <button type="submit">Stop Bot & Clear Token</button>
+    </form>
+    <h2>Members that joined the target server</h2>
+    <table>
+        <tr><th>ID</th><th>Name</th><th>Joined At</th></tr>
+        {% for m in members %}
+        <tr>
+            <td>{{ m.id }}</td>
+            <td>{{ m.name }}</td>
+            <td>{{ m.joined_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">No members yet.</td></tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
