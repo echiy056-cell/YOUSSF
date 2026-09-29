@@ -1,59 +1,61 @@
-import discord
-from discord.ext import commands
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import uvicorn
+# main.py
 import os
+import asyncio
+import discord
+from fastapi import FastAPI
+import uvicorn
 
-# --- Discord Bot Setup ---
+# --------------------------- #
+# 1️⃣  Load secrets & config  #
+# --------------------------- #
+TOKEN = os.getenv("USER_TOKEN")          # <--- your Discord user token
+TARGET_SERVER_ID = int(os.getenv("TARGET_SERVER_ID", "0"))  # ID of the server you want to watch
+
+# --------------------------- #
+# 2️⃣  Discord bot (self‑bot) #
+# --------------------------- #
 intents = discord.Intents.default()
-intents.members = True  # Crucial for seeing joins
+intents.members = True  # Needed for GUILD_MEMBER_ADD
 
-bot = commands.Bot(command_prefix='!', self_bot=True, intents=intents)
+bot = discord.Client(intents=intents)
 
-Store joined members in memory (or use Redis/Postgres for persistence)
+# In‑memory store (you can swap this for Redis/Postgres later)
 joined_members = []
 
 @bot.event
 async def on_ready():
-    print(f'Self-bot logged in as {bot.user}')
-
-@bot.event
-async def on_guild_join(guild):
-    # Optional: Log when the bot itself joins a server
-    pass
+    print(f"✅ Self‑bot logged in as {bot.user}")
 
 @bot.event
 async def on_member_join(member):
-    # Filter for specific servers if needed
-    # Example: Only log joins in Server ID 123456789
-    if member.guild.id == YOUR_TARGET_SERVER_ID:
+    if member.guild.id == TARGET_SERVER_ID:
         joined_members.append({
-            "username": member.name,
-            "discriminator": member.discriminator,
             "id": member.id,
-            "joined_at": str(member.joined_at)
+            "name": f"{member.name}#{member.discriminator}",
+            "joined_at": str(member.joined_at),
         })
-        print(f"New join: {member.name}")
+        print(f"🆕 New member: {member.name}#{member.discriminator}")
 
---- FastAPI Dashboard Setup ---
+# --------------------------- #
+# 3️⃣  FastAPI dashboard      #
+# --------------------------- #
 app = FastAPI()
-
-class Member(BaseModel):
-    username: str
-    discriminator: str
-    id: str
-    joined_at: str
 
 @app.get("/api/members")
 async def get_members():
+    # Return a list of joined members
     return {"members": joined_members}
 
+# --------------------------- #
+# 4️⃣  Startup hook           #
+# --------------------------- #
 @app.on_event("startup")
 async def startup():
     # Run the Discord bot in the background
-    import asyncio
-    asyncio.create_task(bot.start(YOUR_USER_TOKEN, bot=False))
+    asyncio.create_task(bot.start(TOKEN, bot=False))
 
-if name == "main":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# --------------------------- #
+# 5️⃣  Run the app            #
+# --------------------------- #
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
