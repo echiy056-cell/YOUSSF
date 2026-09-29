@@ -5,21 +5,22 @@ import discord
 from fastapi import FastAPI
 import uvicorn
 
-# --------------------------- #
-# 1️⃣  Load secrets & config  #
-# --------------------------- #
-TOKEN = os.getenv("USER_TOKEN")          # <--- your Discord user token
-TARGET_SERVER_ID = int(os.getenv("TARGET_SERVER_ID", "0"))  # ID of the server you want to watch
+# ------------------------------------------------------------------
+# 1️⃣  Load secrets & config
+# ------------------------------------------------------------------
+TOKEN = os.getenv("USER_TOKEN")                     # <-- your Discord user token
+TARGET_SERVER_ID = int(os.getenv("TARGET_SERVER_ID", "0"))  # ID of the server to watch
 
-# --------------------------- #
-# 2️⃣  Discord bot (self‑bot) #
-# --------------------------- #
+# ------------------------------------------------------------------
+# 2️⃣  Discord client (self‑bot)
+# ------------------------------------------------------------------
 intents = discord.Intents.default()
-intents.members = True  # Needed for GUILD_MEMBER_ADD
+intents.members = True          # Needed for member joins
 
-bot = discord.Client(intents=intents)
+# Pass bot=False to indicate this is a self‑bot
+bot = discord.Client(intents=intents, bot=False)
 
-# In‑memory store (you can swap this for Redis/Postgres later)
+# In‑memory storage – replace with Redis/Postgres if you need persistence
 joined_members = []
 
 @bot.event
@@ -36,26 +37,29 @@ async def on_member_join(member):
         })
         print(f"🆕 New member: {member.name}#{member.discriminator}")
 
-# --------------------------- #
-# 3️⃣  FastAPI dashboard      #
-# --------------------------- #
+# ------------------------------------------------------------------
+# 3️⃣  FastAPI dashboard
+# ------------------------------------------------------------------
 app = FastAPI()
 
 @app.get("/api/members")
 async def get_members():
-    # Return a list of joined members
     return {"members": joined_members}
 
-# --------------------------- #
-# 4️⃣  Startup hook           #
-# --------------------------- #
+# ------------------------------------------------------------------
+# 4️⃣  Startup / Shutdown hooks
+# ------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
     # Run the Discord bot in the background
-    asyncio.create_task(bot.start(TOKEN, bot=False))
+    asyncio.create_task(bot.start(TOKEN))
 
-# --------------------------- #
-# 5️⃣  Run the app            #
-# --------------------------- #
+@app.on_event("shutdown")
+async def shutdown():
+    await bot.close()
+
+# ------------------------------------------------------------------
+# 5️⃣  Run the app
+# ------------------------------------------------------------------
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
