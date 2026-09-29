@@ -1,0 +1,19 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Discord Self‑Bot Dashboard – Token Input</title>
+</head>
+<body>
+    <h1>Enter your Discord User Token</h1>
+    <form action="/set_token" method="post">
+        <label for="user_token">User Token:</label><br>
+        <input type="password" id="user_token" name="user_token" required style="width:400px"><br><br>
+        <button type="submit">Start Bot</button>
+    </form>
+    <p>
+        <strong>⚠️ Warning:</strong> This token is highly sensitive. Do <strong>not</strong> share it.
+    </p>
+</body>
+</html>
