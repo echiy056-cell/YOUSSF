@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Discord Join Spy Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background: #2c2f33; color: white; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 10px; border: 1px solid #444; text-align: left; }
+        th { background: #40444b; }
+    </style>
+</head>
+<body>
+    <h1>Discord Join Spy</h1>
+    <button onclick="fetchMembers()">Refresh Data</button>
+    <table id="memberTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Joined At</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        async function fetchMembers() {
+            const response = await fetch('/api/members');
+            const data = await response.json();
+            const tbody = document.querySelector('#memberTable tbody');
+            tbody.innerHTML = '';
+
+            data.members.forEach(member => {
+                const row = <tr>
+                    <td>${member.id}</td>
+                    <td>${member.username}#${member.discriminator}</td>
+                    <td>${member.joined_at}</td>
+                </tr>;
+                tbody.innerHTML += row;
+            });
+        }
+
+        // Auto-refresh every 5 seconds
+        setInterval(fetchMembers, 5000);
+        fetchMembers();
+    </script>
+</body>
+</html>
