@@ -5,7 +5,7 @@ from pydantic import BaseModel
 import uvicorn
 import os
 
---- Discord Bot Setup ---
+# --- Discord Bot Setup ---
 intents = discord.Intents.default()
 intents.members = True  # Crucial for seeing joins
 
